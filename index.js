@@ -6,10 +6,13 @@ const serviceAccount = require("./firebase-store-node-firebase-adminsdk-tja8v-ce
 const firebaseAdmin = require('firebase-admin');
 const uniqid = require('uniqid');
 const save = require("./helpers/saveImage");
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
 
-
-const testUrl = "https://www.citilink.ru/catalog/smartfony";
+const testUrl = "https://www.citilink.ru/catalog/mp3-pleery";
 const baseUrl = "https://www.citilink.ru";
+const productCategory = "mp3-pleery";
 //https://items.s1.citilink.ru/1391508_v02_b.jpg
 
 const fireBaseSave = async (imgUrl, storageRef) => {
@@ -33,13 +36,13 @@ const parseData = async (url, page) => {
         const SELECTOR_3 = ".ProductHeader__price-default_current-price";
         const SELECTOR_4 = ".ProductHeader.js--ProductHeader";
         const SELECTOR_5 = "div.swiper-slide.PreviewList__li.PreviewList__item > img";
-        const SELECTOR_6 = "div.SpecificationsFull:nth-child(1) > div:nth-child(2) > div:nth-child(1) > div:nth-child(2)";
-        const SELECTOR_7 = "div.Breadcrumbs:nth-child(3) > a:nth-child(1) > span:nth-child(1)";
+        const SELECTOR_6 = "div.Breadcrumbs:nth-child(3) > a:nth-child(1) > span:nth-child(1)";
+        const SELECTOR_7 = "div.Breadcrumbs:nth-child(4) > a:nth-child(1) > span:nth-child(1)";
 
         const content = await getContent(url, page);
         let $ = cheerio.load(content);
         const productName = $("h1.Heading").text().trim().split(" ").slice(1).join(" ");
-        const price = $(SELECTOR_4).find(SELECTOR_3).text().trim();
+        const price = Number($(SELECTOR_4).find(SELECTOR_3).text().replace(/ /g, ""));
         const images = new Set();
         $(SELECTOR_5).each((ind, img) => {
             const url = $(img).attr("src");
@@ -63,13 +66,12 @@ const parseData = async (url, page) => {
             const title = $(el).find(".SpecificationsFull__title").text().trim();
             if (title) {
                 data.title = title;
-                data.description = {};
                 $(el).find(".Specifications__row").each((ind, elem) => {
                     $(elem).find("div.Tooltip.js--Tooltip.js--Tooltip_click").remove();
                     const col_name = $(elem).find(SELECTOR_1).text().trim();
                     const col_value = $(elem).find(SELECTOR_2).text().trim();
-                    if (!data.description[col_name]) {
-                        data.description[col_name] = col_value;
+                    if (!data[col_name]) {
+                        data[col_name] = col_value;
                     }
                 });
             };
@@ -128,7 +130,7 @@ const getContent = async (url, page) => {
     }
 }
 
-const main = async (url, baseUrl) => {
+const main = async (url, baseUrl, productCategory) => {
     try {
         const admin = firebaseAdmin.initializeApp({
             credential: firebaseAdmin.credential.cert(serviceAccount),
@@ -140,7 +142,7 @@ const main = async (url, baseUrl) => {
         const content = await getContent(url, page);
         let $ = cheerio.load(content);
         const pageProductUrls = [];
-        $("div.product_data__gtm-js > div:nth-child(3) > a:nth-child(1)").each((i, el) => {
+        $("div.product_data__gtm-js > div:nth-child(2) > div:nth-child(1) > div:nth-child(3) > div:nth-child(1) > a:nth-child(1)").each((i, el) => {
             const attr = $(el).attr("href");
             const resultUrl = `${baseUrl}${attr}`;
             pageProductUrls.push(resultUrl);
@@ -148,14 +150,25 @@ const main = async (url, baseUrl) => {
         console.log('pageProductUrls')
         page.close();
         let generator = scrapData(pageProductUrls, browser, storageRef);
+        const writeFile = util.promisify(fs.writeFile);
         console.log('generator start')
         for await(let data of generator) {
             console.log('checked');
+            data.category = productCategory;
             console.log(data);
+            await writeFile(
+                `${path.join(__dirname, "result")}/${data.productName.replace(/\//g, ' ')}_${uniqid()}.json`,
+                JSON.stringify(data, null, 2),
+                (err) => {
+                  if (err) throw err;
+                  console.log("файл сохранен.", data);
+                }
+              );
+            
         }
     } catch (e) {
         console.log(e);
         return e;
     }
 }
-main(testUrl, baseUrl);
+main(testUrl, baseUrl, productCategory);
